@@ -36,3 +36,10 @@ pip install -r requirements.txt
 ```
 
 # Running Codegen Profiling
+
+Running profiling requires the use of sudo as nvprof requires root permissions for security.  This can override your python path if you run from a virtual environment.
+
+### Example
+```
+sudo <path to python>/python prof_codegen.py --block-x-start 10 --block-x-stop 320 --block-x-inc 10 --thread-x-start 128 --thread-x-stop 128 --thread-x-inc 128
+```
