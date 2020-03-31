@@ -17,7 +17,13 @@
 
 using namespace torch::jit::fuser;
 
-int main() {
+int main(int argc, char* argv[]) {
+
+  if (argc != 2) {
+    throw std::runtime_error("You forgot to input the number of trials!");
+  }
+  int trials = atoi(argv[1]);
+
   Fusion fusion;
   FusionGuard fg(&fusion);
   //dimensionality of the problem
@@ -88,12 +94,13 @@ int main() {
   std::vector<at::Tensor> outputs{{output}};
 
   torch::jit::fuser::cuda::compileKernel(fusion, prog);
-  torch::jit::fuser::cuda::runTestKernel(prog, inputs, outputs);
 
-  at::Tensor tv2_ref = input0 + input1;
-  at::Tensor output_ref = input3 + tv2_ref;
+  for(int i = 0; i < trials; i++ ) {
+  	torch::jit::fuser::cuda::runTestKernel(prog, inputs, outputs);
+  }
 
-  //TORCH_CHECK(output_ref.equal(output));
+  //at::Tensor tv2_ref = input0 + input1;
+  //at::Tensor output_ref = input3 + tv2_ref;
 
   return 0;
 }

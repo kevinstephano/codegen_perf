@@ -26,3 +26,13 @@ cd build
 cmake -DCMAKE_PREFIX_PATH=<Absolute Path to your Pytorch Root Directory> ..
 cmake --build . --config Release
 ```
+
+# Requirements
+
+The profiling scripts require the Python package Pandas.
+
+```
+pip install -r requirements.txt
+```
+
+# Running Codegen Profiling
