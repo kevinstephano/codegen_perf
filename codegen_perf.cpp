@@ -2,16 +2,9 @@
 #include <torch/csrc/jit/codegen/cuda/arith.h>
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
 #include <torch/csrc/jit/codegen/cuda/iriostream.h>
-#include <torch/csrc/jit/codegen/cuda/mutator.h>
 #include <torch/csrc/jit/codegen/cuda/tensor.h>
-#include <torch/csrc/jit/codegen/cuda/tensor_meta.h>
-#include <torch/csrc/jit/codegen/cuda/transform_replay.h>
 #include <torch/csrc/jit/codegen/cuda/code_write.h>
 #include <torch/csrc/jit/codegen/cuda/kernel.h>
-
-// fuser and IR parser
-#include <torch/csrc/jit/codegen/cuda/parser.h>
-#include "torch/csrc/jit/ir/irparser.h"
 
 #include <iostream>
 
