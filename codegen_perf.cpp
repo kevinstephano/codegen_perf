@@ -12,10 +12,13 @@ using namespace torch::jit::fuser;
 
 int main(int argc, char* argv[]) {
 
-  if (argc != 2) {
+  if (argc != 5) {
     throw std::runtime_error("You forgot to input the number of trials!");
   }
   int trials = atoi(argv[1]);
+  int bidx   = atoi(argv[2]);
+  int bidy   = atoi(argv[3]);
+  int tidx   = atoi(argv[4]);
 
   Fusion fusion;
   FusionGuard fg(&fusion);
@@ -50,15 +53,15 @@ int main(int argc, char* argv[]) {
   tv4->merge(0);
 
   // Split by n_threads
-  tv4->split(-1, 64*512);
-  tv4->split(-1, 512);
+  tv4->split(-1, bidy*tidx);
+  tv4->split(-1, tidx);
 
   //For all inputs, computeAt the output inline, temporaries should be squeezed between them
   tv0->computeAt(tv4, -1);
   tv1->computeAt(tv4, -1);
   tv3->computeAt(tv4, -1);
 
-  //Parallelize TV3
+  //Parallelize TV4
   tv4->axis(0)->parallelize(ParallelType::BIDx);
   tv4->axis(-2)->parallelize(ParallelType::BIDy);
   tv4->axis(-1)->parallelize(ParallelType::TIDx);
@@ -71,15 +74,15 @@ int main(int argc, char* argv[]) {
 
   torch::jit::fuser::cuda::CudaKernel prog;
   prog.device_ = 0;
-  prog.grid(80,64);     //   1 CTA
-  prog.block(512); // 256 Threads
+  prog.grid(bidx,bidy);
+  prog.block(tidx);
 
   auto options =
   at::TensorOptions()
     .dtype(at::kFloat)
     .device(at::kCUDA, 0);
 
-  at::Tensor input0 = at::randn({80,64,512}, options);
+  at::Tensor input0 = at::randn({bidx,bidy,tidx}, options);
   at::Tensor input1 = at::randn_like(input0);;
   at::Tensor input3 = at::randn_like(input0);;
   at::Tensor output = at::empty_like(input0);
