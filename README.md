@@ -23,7 +23,7 @@ python ../tools/build_libtorch.py
 ```
 mkdir build
 cd build
-cmake -DCMAKE_PREFIX_PATH=<Absolute Path to your Pytorch Root Directory> ..
+cmake -DCMAKE_CXX_FLAGS="-I <Absolute Path to your Pytorch Root Directory>" -DCMAKE_PREFIX_PATH=<Absolute Path to your Pytorch Root Directory> ..
 cmake --build . --config Release
 ```
 
