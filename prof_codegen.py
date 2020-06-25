@@ -15,10 +15,11 @@ parser.add_argument('--mem-clock', default=796.0, type=float, help='Mem Clock Fr
 parser.add_argument('--block-x-start', default=80, type=int, help='Block X')
 parser.add_argument('--block-x-inc', default=5, type=int, help='Block X')
 parser.add_argument('--block-x-stop', default=80, type=int, help='Block X')
-parser.add_argument('--block-y', default=64, type=int, help='Block Y')
-parser.add_argument('--thread-x-start', default=65, type=int, help='Thread X')
-parser.add_argument('--thread-x-inc', default=64, type=int, help='Thread X')
+parser.add_argument('--block-y', default=1, type=int, help='Block Y')
+parser.add_argument('--thread-x-start', default=32, type=int, help='Thread X')
+parser.add_argument('--thread-x-inc', default=32, type=int, help='Thread X')
 parser.add_argument('--thread-x-stop', default=512, type=int, help='Thread X')
+parser.add_argument('--thread-y', default=1, type=int, help='Thread Y')
 parser.add_argument('--elem-size', default=4, type=int, help='Bytes per element')
 
 args = parser.parse_args()
@@ -27,7 +28,7 @@ default_list = [args.cuda_bin + 'nvprof', '--device-buffer-size', '128', '--prin
 
 for bidx in range(args.block_x_start, args.block_x_stop+args.block_x_inc, args.block_x_inc) :
     for tidx in range(args.thread_x_start, args.thread_x_stop+args.thread_x_inc, args.thread_x_inc) :
-        cmd_list = default_list + [str(bidx), str(args.block_y), str(tidx)]
+        cmd_list = default_list + [str(bidx), str(args.block_y), str(tidx), str(args.thread_y)]
         output = subprocess.run(cmd_list, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
 
         # Crop the csv file of extra nvprof lines

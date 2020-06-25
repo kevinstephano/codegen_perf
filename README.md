@@ -20,6 +20,11 @@ python ../tools/build_libtorch.py
 
 ## Building Standalone App
 
+Remember to delete your old `build` diectory, first.
+```
+./run_build.sh <Path to your Pytorch Root Directory>
+```
+
 ```
 mkdir build
 cd build

@@ -1,102 +1,80 @@
-#include <torch/csrc/jit/codegen/cuda/ir_interface_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/arith.h>
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
-#include <torch/csrc/jit/codegen/cuda/iriostream.h>
-#include <torch/csrc/jit/codegen/cuda/tensor.h>
-#include <torch/csrc/jit/codegen/cuda/code_write.h>
+#include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/kernel.h>
+#include <torch/csrc/jit/codegen/cuda/lower2device.h>
+#include <torch/csrc/jit/codegen/cuda/type.h>
+#include <torch/csrc/jit/codegen/cuda/scheduler.h>
+#include <ATen/core/ivalue.h>
 
 #include <iostream>
 
 using namespace torch::jit::fuser;
 
+static TensorView* makeDummyTensor(
+    int nDims,
+    DataType dtype = DataType::Float) {
+  std::vector<IterDomain*> dom;
+  for (int i = 0; i < nDims; i++)
+    dom.push_back(new IterDomain(new Int(0), new Int()));
+
+  return new TensorView(new TensorDomain(dom), dtype);
+}
+
+void reduction(int trials, int red_dim, int dim0, int dim1) {
+  torch::jit::fuser::cuda::CudaKernel prog;
+  Fusion& fusion = *prog.fusion_;
+  FusionGuard fg(&fusion);
+
+  // Set up your input tensor views
+  TensorView* tv0 = makeDummyTensor(2);
+  fusion.addInput(tv0);
+
+  TensorView* tv1 = reductionOp(BinaryOpType::Add, {red_dim}, new Float(0), tv0);
+  fusion.addOutput(tv1);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor input = at::rand({dim0, dim1}, options);
+  at::Tensor cg_output = at::empty({(red_dim == 0 ? dim1 : dim0) }, options);
+
+  // Apply reduction heuristic
+  const at::ArrayRef<c10::IValue> inputs({input});
+
+  c10::optional<std::tuple<int,int,int,int>> blocking =
+        Scheduler::reduction(prog.fusion_.get(), inputs);
+  TORCH_CHECK(blocking != c10::nullopt, "Reduction is not found!");
+
+  fusion.printMath();
+  GPULower gpulw(&fusion);
+  gpulw.printKernel(std::cout);
+
+  prog.device_ = 0;
+  prog.grid(std::get<0>(blocking.value()), std::get<1>(blocking.value()));
+  prog.block(std::get<2>(blocking.value()), std::get<3>(blocking.value()));
+
+  torch::jit::fuser::cuda::compileKernel(&prog);
+  torch::jit::fuser::cuda::runTestKernel(&prog, {input}, {cg_output});
+
+  auto aten_output = input.sum({red_dim});
+
+  std::cout << aten_output << std::endl;
+  std::cout << cg_output << std::endl;
+  TORCH_CHECK(aten_output.allclose(cg_output),
+              "Error of: ",
+              aten_output.sub(cg_output).abs().max());
+}
+
 int main(int argc, char* argv[]) {
 
-  if (argc != 5) {
+  if (argc != 8) {
     throw std::runtime_error("You forgot to input the number of trials!");
   }
-  int trials = atoi(argv[1]);
-  int bidx   = atoi(argv[2]);
-  int bidy   = atoi(argv[3]);
-  int tidx   = atoi(argv[4]);
+  int trials  = atoi(argv[1]);
+  int red_dim = atoi(argv[2]);
+  int dim0    = atoi(argv[3]);
+  int dim1    = atoi(argv[4]);
 
-  Fusion fusion;
-  FusionGuard fg(&fusion);
-  //dimensionality of the problem
-  int nDims = 3;
-
-  //Set up symbolic sizes for the axes should be dimensionality of the problem
-  std::vector<IterDomain*> dom;
-  for(int i=0; i<nDims; i++)
-    dom.push_back(new IterDomain(new Int()));
-
-  //Set up your input tensor views
-  TensorView* tv0 = new TensorView(new TensorDomain(dom), DataType::Float);
-  TensorView* tv1 = new TensorView(new TensorDomain(dom), DataType::Float);
-  TensorView* tv3 = new TensorView(new TensorDomain(dom), DataType::Float);
-
-  //Register your inputs
-  fusion.addInput(tv0);
-  fusion.addInput(tv1);
-  fusion.addInput(tv3);
-
-  //Do math with it, it returns a `Val*` but can be static_casted back to TensorView
-  TensorView* tv2 = static_cast<TensorView*>(add(tv0, tv1));
-  TensorView* tv4 = static_cast<TensorView*>(add(tv3, tv2));
-
-  //Register your outputs
-  fusion.addOutput(tv4);
-
-  // Do transformations, remember, transformations are outputs to inputs
-  // This doesn't have to be in this order
-  tv4->merge(1);
-  tv4->merge(0);
-
-  // Split by n_threads
-  tv4->split(-1, bidy*tidx);
-  tv4->split(-1, tidx);
-
-  //For all inputs, computeAt the output inline, temporaries should be squeezed between them
-  tv0->computeAt(tv4, -1);
-  tv1->computeAt(tv4, -1);
-  tv3->computeAt(tv4, -1);
-
-  //Parallelize TV4
-  tv4->axis(0)->parallelize(ParallelType::BIDx);
-  tv4->axis(-2)->parallelize(ParallelType::BIDy);
-  tv4->axis(-1)->parallelize(ParallelType::TIDx);
-  
-  std::stringstream cdg;
-  CodeWrite cw(cdg);
-  cw.traverse(&fusion);
-
-  std::cout << cdg.str() << std::endl;
-
-  torch::jit::fuser::cuda::CudaKernel prog;
-  prog.device_ = 0;
-  prog.grid(bidx,bidy);
-  prog.block(tidx);
-
-  auto options =
-  at::TensorOptions()
-    .dtype(at::kFloat)
-    .device(at::kCUDA, 0);
-
-  at::Tensor input0 = at::randn({bidx,bidy,tidx}, options);
-  at::Tensor input1 = at::randn_like(input0);;
-  at::Tensor input3 = at::randn_like(input0);;
-  at::Tensor output = at::empty_like(input0);
-  std::vector<at::Tensor> inputs{{input0, input1, input3}};
-  std::vector<at::Tensor> outputs{{output}};
-
-  torch::jit::fuser::cuda::compileKernel(fusion, prog);
-
-  for(int i = 0; i < trials; i++ ) {
-  	torch::jit::fuser::cuda::runTestKernel(prog, inputs, outputs);
-  }
-
-  //at::Tensor tv2_ref = input0 + input1;
-  //at::Tensor output_ref = input3 + tv2_ref;
+  reduction(trials, red_dim, dim0, dim1);
 
   return 0;
 }
