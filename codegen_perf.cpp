@@ -44,21 +44,22 @@ void reduction(int trials, int red_dim, int dim0, int dim1) {
         Scheduler::reduction(prog.fusion_.get(), inputs);
   TORCH_CHECK(blocking != c10::nullopt, "Reduction is not found!");
 
-  fusion.printMath();
-  GPULower gpulw(&fusion);
-  gpulw.printKernel(std::cout);
+  //fusion.printMath();
+  //GPULower gpulw(&fusion);
+  //gpulw.printKernel(std::cout);
 
   prog.device_ = 0;
   prog.grid(std::get<0>(blocking.value()), std::get<1>(blocking.value()));
   prog.block(std::get<2>(blocking.value()), std::get<3>(blocking.value()));
 
   torch::jit::fuser::cuda::compileKernel(&prog);
-  torch::jit::fuser::cuda::runTestKernel(&prog, {input}, {cg_output});
 
-  auto aten_output = input.sum({red_dim});
+  at::Tensor aten_output;
+  for (int i = 0; i < trials; ++i) {
+    torch::jit::fuser::cuda::runTestKernel(&prog, {input}, {cg_output});
+    aten_output = input.sum({red_dim});
+  }
 
-  std::cout << aten_output << std::endl;
-  std::cout << cg_output << std::endl;
   TORCH_CHECK(aten_output.allclose(cg_output),
               "Error of: ",
               aten_output.sub(cg_output).abs().max());
@@ -66,7 +67,7 @@ void reduction(int trials, int red_dim, int dim0, int dim1) {
 
 int main(int argc, char* argv[]) {
 
-  if (argc != 8) {
+  if (argc != 5) {
     throw std::runtime_error("You forgot to input the number of trials!");
   }
   int trials  = atoi(argv[1]);
