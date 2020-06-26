@@ -11,6 +11,8 @@ parser.add_argument('--trials', default='10', type=int, help='Number of Trials t
 parser.add_argument('--warmup-trials', default='10', type=int, help='Warmup Trials to discard')
 parser.add_argument('--cuda-bin', default='/usr/local/cuda/bin/', type=str, help='Cuda Path')
 parser.add_argument('--print', action='store_true', help='Print profiler lines.')
+parser.add_argument('--ti', action='store_true', help='Run TensorIterator only.')
+parser.add_argument('--print-stdout', action='store_true', help='Run TensorIterator only.')
 parser.add_argument('--mem-clock', default=796.0, type=float, help='Mem Clock Frequency MHz')
 parser.add_argument('--dim0-start', default=80, type=int, help='Block X')
 parser.add_argument('--dim0-inc', default=5, type=int, help='Block X')
@@ -27,9 +29,11 @@ default_list = [args.cuda_bin + 'nvprof', '--device-buffer-size', '128', '--prin
 
 for dim0 in range(args.dim0_start, args.dim0_stop+args.dim0_inc, args.dim0_inc) :
     for dim1 in range(args.dim1_start, args.dim1_stop+args.dim1_inc, args.dim1_inc) :
-        cmd_list = default_list + [str(args.red_axis), str(dim0), str(dim1)]
+        cmd_list = default_list + [str(args.red_axis), str(dim0), str(dim1), str(1) if args.ti else str(0) ]
         output = subprocess.run(cmd_list, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
-
+ 
+        if args.print_stdout :
+          print(output.stdout)
         # Crop the csv file of extra nvprof lines
         assert os.path.exists('prof_file.csv'), "ERROR: Run failed. No profiler output!"
         exclude = re.compile('^==\d+==')
@@ -45,20 +49,6 @@ for dim0 in range(args.dim0_start, args.dim0_stop+args.dim0_inc, args.dim0_inc) 
         # Process profile time to gather kernel's average time
         df = pd.read_csv('prof_file.csv', header=0)
         time_scale = df.iloc[0]['Duration']
-        df_cg = df[df['Name'].str.contains("CudaCodeGen::kernel", na=False)]
-        df_ti = df[df['Name'].str.contains("ReduceOp", na=False)]
-        df_ti = df_ti[:-1]
-
-        mean_val = df_cg[args.warmup_trials:]['Duration'].astype(float).mean()
-        mean_val_ti = df_cg[args.warmup_trials:-1]['Duration'].astype(float).mean()
-        # Adjust time scale so it is consistent
-        if time_scale == 's' :
-            mean_val *= 1000000.0
-            mean_val_ti *= 1000000.0
-        elif time_scale == 'ms' :
-            mean_val *= 1000.0
-            mean_val_ti *= 1000.0
-
         # Bandwidth efficiency calculation
         tensor_size = dim0 * dim1
         if args.red_axis == 0 :
@@ -67,14 +57,34 @@ for dim0 in range(args.dim0_start, args.dim0_stop+args.dim0_inc, args.dim0_inc) 
             tensor_size += dim0
         total_bytes = tensor_size * args.elem_size
         expected_val = total_bytes / (1024.0 * args.mem_clock * 1000000.0) * 1000000.0
-        efficiency = expected_val / mean_val * 100.0
+
+        if not args.ti :
+             df_cg = df[df['Name'].str.contains("CudaCodeGen::kernel", na=False)]
+             mean_val = df_cg[args.warmup_trials:]['Duration'].astype(float).mean()
+             # Adjust time scale so it is consistent
+             if time_scale == 's' :
+                 mean_val *= 1000000.0
+             elif time_scale == 'ms' :
+                 mean_val *= 1000.0
+             efficiency = expected_val / mean_val * 100.0
+
+        df_ti = df[df['Name'].str.contains("ReduceOp", na=False)]
+        df_ti = df_ti[:-1]
+
+        mean_val_ti = df_ti[args.warmup_trials:-1]['Duration'].astype(float).mean()
+        # Adjust time scale so it is consistent
+        if time_scale == 's' :
+            mean_val_ti *= 1000000.0
+        elif time_scale == 'ms' :
+            mean_val_ti *= 1000.0
         efficiency_ti = expected_val / mean_val_ti * 100.0
 
         if args.print :
             print(df[args.warmup_trials:])
-        print(">>>CdGen Size: Grid: {:4} {:4} Block: {:4} {:4} Axis: {} Dim0: {} Dim1: {} Total Bytes: {:.03f} MB Elements: {:3d} Time: {:.03f} us {:.01f} %EFF".format( \
-            int(df_cg.iloc[0]['Grid X']), int(df_cg.iloc[0]['Grid Y']), int(df_cg.iloc[0]['Block X']), int(df_cg.iloc[0]['Block Y']), \
-            args.red_axis, dim0, dim1, total_bytes/1000000.0, tensor_size, mean_val, efficiency))
+        if not args.ti :
+            print(">>>CdGen Size: Grid: {:4} {:4} Block: {:4} {:4} Axis: {} Dim0: {} Dim1: {} Total Bytes: {:.03f} MB Elements: {:3d} Time: {:.03f} us {:.01f} %EFF".format( \
+                int(df_cg.iloc[0]['Grid X']), int(df_cg.iloc[0]['Grid Y']), int(df_cg.iloc[0]['Block X']), int(df_cg.iloc[0]['Block Y']), \
+                args.red_axis, dim0, dim1, total_bytes/1000000.0, tensor_size, mean_val, efficiency))
         print(">>>TIter Size: Grid: {:4} {:4} Block: {:4} {:4} Axis: {} Dim0: {} Dim1: {} Total Bytes: {:.03f} MB Elements: {:3d} Time: {:.03f} us {:.01f} %EFF".format( \
             int(df_ti.iloc[0]['Grid X']), int(df_ti.iloc[0]['Grid Y']), int(df_ti.iloc[0]['Block X']), int(df_ti.iloc[0]['Block Y']), \
             args.red_axis, dim0, dim1, total_bytes/1000000.0, tensor_size, mean_val_ti, efficiency_ti))

@@ -21,7 +21,7 @@ static TensorView* makeDummyTensor(
   return new TensorView(new TensorDomain(dom), dtype);
 }
 
-void reduction(int trials, int red_dim, int dim0, int dim1) {
+void reduction(int trials, int red_dim, int dim0, int dim1, bool ti_only) {
   torch::jit::fuser::cuda::CudaKernel prog;
   Fusion& fusion = *prog.fusion_;
   FusionGuard fg(&fusion);
@@ -44,9 +44,9 @@ void reduction(int trials, int red_dim, int dim0, int dim1) {
         Scheduler::reduction(prog.fusion_.get(), inputs);
   TORCH_CHECK(blocking != c10::nullopt, "Reduction is not found!");
 
-  //fusion.printMath();
-  //GPULower gpulw(&fusion);
-  //gpulw.printKernel(std::cout);
+  fusion.printMath();
+  GPULower gpulw(&fusion);
+  gpulw.printKernel(std::cout);
 
   prog.device_ = 0;
   prog.grid(std::get<0>(blocking.value()), std::get<1>(blocking.value()));
@@ -56,26 +56,32 @@ void reduction(int trials, int red_dim, int dim0, int dim1) {
 
   at::Tensor aten_output;
   for (int i = 0; i < trials; ++i) {
-    torch::jit::fuser::cuda::runTestKernel(&prog, {input}, {cg_output});
+    if( !ti_only )
+      torch::jit::fuser::cuda::runTestKernel(&prog, {input}, {cg_output});
     aten_output = input.sum({red_dim});
   }
 
-  TORCH_CHECK(aten_output.allclose(cg_output),
-              "Error of: ",
-              aten_output.sub(cg_output).abs().max());
+  //if( !ti_only)
+  //  if (! aten_output.allclose(cg_output))
+  //    std::cout << "ATEN and Codegen mismatch!!!" << std::endl;
+  if( !ti_only)
+    TORCH_CHECK(aten_output.allclose(cg_output),
+                "Error of: ",
+                aten_output.sub(cg_output).abs().max());
 }
 
 int main(int argc, char* argv[]) {
 
-  if (argc != 5) {
+  if (argc != 6) {
     throw std::runtime_error("You forgot to input the number of trials!");
   }
   int trials  = atoi(argv[1]);
   int red_dim = atoi(argv[2]);
   int dim0    = atoi(argv[3]);
   int dim1    = atoi(argv[4]);
+  bool ti_only= static_cast<bool>(atoi(argv[5]));
 
-  reduction(trials, red_dim, dim0, dim1);
+  reduction(trials, red_dim, dim0, dim1, ti_only);
 
   return 0;
 }
