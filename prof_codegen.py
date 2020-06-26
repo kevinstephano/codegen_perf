@@ -45,14 +45,19 @@ for dim0 in range(args.dim0_start, args.dim0_stop+args.dim0_inc, args.dim0_inc) 
         # Process profile time to gather kernel's average time
         df = pd.read_csv('prof_file.csv', header=0)
         time_scale = df.iloc[0]['Duration']
-        df = df[df['Name'].str.contains("CudaCodeGen::kernel", na=False)]
-        #print(df)
-        mean_val = df[args.warmup_trials:]['Duration'].astype(float).mean()
+        df_cg = df[df['Name'].str.contains("CudaCodeGen::kernel", na=False)]
+        df_ti = df[df['Name'].str.contains("ReduceOp", na=False)]
+        df_ti = df_ti[:-1]
+
+        mean_val = df_cg[args.warmup_trials:]['Duration'].astype(float).mean()
+        mean_val_ti = df_cg[args.warmup_trials:-1]['Duration'].astype(float).mean()
         # Adjust time scale so it is consistent
         if time_scale == 's' :
             mean_val *= 1000000.0
+            mean_val_ti *= 1000000.0
         elif time_scale == 'ms' :
             mean_val *= 1000.0
+            mean_val_ti *= 1000.0
 
         # Bandwidth efficiency calculation
         tensor_size = dim0 * dim1
@@ -63,10 +68,14 @@ for dim0 in range(args.dim0_start, args.dim0_stop+args.dim0_inc, args.dim0_inc) 
         total_bytes = tensor_size * args.elem_size
         expected_val = total_bytes / (1024.0 * args.mem_clock * 1000000.0) * 1000000.0
         efficiency = expected_val / mean_val * 100.0
+        efficiency_ti = expected_val / mean_val_ti * 100.0
 
         if args.print :
             print(df[args.warmup_trials:])
-        print(">>>Size: Grid: {} {} Block: {} {} Axis: {} Dim0: {} Dim1: {} Total Bytes: {:.03f} MB Elements: {:3d} Time: {:.03f} us {:.01f} %EFF".format( \
-            df.iloc[0]['Grid X'], df.iloc[0]['Grid Y'], df.iloc[0]['Block X'], df.iloc[0]['Block Y'], \
+        print(">>>CdGen Size: Grid: {:4} {:4} Block: {:4} {:4} Axis: {} Dim0: {} Dim1: {} Total Bytes: {:.03f} MB Elements: {:3d} Time: {:.03f} us {:.01f} %EFF".format( \
+            int(df_cg.iloc[0]['Grid X']), int(df_cg.iloc[0]['Grid Y']), int(df_cg.iloc[0]['Block X']), int(df_cg.iloc[0]['Block Y']), \
             args.red_axis, dim0, dim1, total_bytes/1000000.0, tensor_size, mean_val, efficiency))
-        os.remove("prof_file.csv")
+        print(">>>TIter Size: Grid: {:4} {:4} Block: {:4} {:4} Axis: {} Dim0: {} Dim1: {} Total Bytes: {:.03f} MB Elements: {:3d} Time: {:.03f} us {:.01f} %EFF".format( \
+            int(df_ti.iloc[0]['Grid X']), int(df_ti.iloc[0]['Grid Y']), int(df_ti.iloc[0]['Block X']), int(df_ti.iloc[0]['Block Y']), \
+            args.red_axis, dim0, dim1, total_bytes/1000000.0, tensor_size, mean_val_ti, efficiency_ti))
+        #os.remove("prof_file.csv")
