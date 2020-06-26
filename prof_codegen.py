@@ -78,4 +78,4 @@ for dim0 in range(args.dim0_start, args.dim0_stop+args.dim0_inc, args.dim0_inc) 
         print(">>>TIter Size: Grid: {:4} {:4} Block: {:4} {:4} Axis: {} Dim0: {} Dim1: {} Total Bytes: {:.03f} MB Elements: {:3d} Time: {:.03f} us {:.01f} %EFF".format( \
             int(df_ti.iloc[0]['Grid X']), int(df_ti.iloc[0]['Grid Y']), int(df_ti.iloc[0]['Block X']), int(df_ti.iloc[0]['Block Y']), \
             args.red_axis, dim0, dim1, total_bytes/1000000.0, tensor_size, mean_val_ti, efficiency_ti))
-        #os.remove("prof_file.csv")
+        os.remove("prof_file.csv")
