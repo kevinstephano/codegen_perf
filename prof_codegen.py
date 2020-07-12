@@ -12,6 +12,7 @@ parser.add_argument('--warmup-trials', default='10', type=int, help='Warmup Tria
 parser.add_argument('--cuda-bin', default='/usr/local/cuda/bin/', type=str, help='Cuda Path')
 parser.add_argument('--print', action='store_true', help='Print profiler lines.')
 parser.add_argument('--ti', action='store_true', help='Run TensorIterator only.')
+parser.add_argument('--fp16', action='store_true', help='Run FP16 precision.')
 parser.add_argument('--print-stdout', action='store_true', help='Run TensorIterator only.')
 parser.add_argument('--mem-clock', default=796.0, type=float, help='Mem Clock Frequency MHz')
 parser.add_argument('--dim0-start', default=80, type=int, help='Block X')
@@ -29,7 +30,7 @@ default_list = [args.cuda_bin + 'nvprof', '--device-buffer-size', '128', '--prin
 
 for dim0 in range(args.dim0_start, args.dim0_stop+args.dim0_inc, args.dim0_inc) :
     for dim1 in range(args.dim1_start, args.dim1_stop+args.dim1_inc, args.dim1_inc) :
-        cmd_list = default_list + [str(args.red_axis), str(dim0), str(dim1), str(1) if args.ti else str(0) ]
+        cmd_list = default_list + [str(args.red_axis), str(dim0), str(dim1), str(1) if args.ti else str(0), str(1) if args.fp16 else str(0) ]
         output = subprocess.run(cmd_list, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
  
         if args.print_stdout :
@@ -71,7 +72,21 @@ for dim0 in range(args.dim0_start, args.dim0_stop+args.dim0_inc, args.dim0_inc) 
         df_ti = df[df['Name'].str.contains("ReduceOp", na=False)]
         df_ti = df_ti[:-1]
 
-        mean_val_ti = df_ti[args.warmup_trials:-1]['Duration'].astype(float).mean()
+        #mean_val_ti = df_ti[args.warmup_trials:-1]['Duration'].astype(float).mean()
+        kernel_diff = 0
+        if not args.ti :
+            kernels_ti = df_ti[args.warmup_trials:]['Duration'].count()
+            kernels_cg = df_cg[args.warmup_trials:]['Duration'].count()
+            #print(kernels_ti, kernels_cg)
+            if( kernels_ti > kernels_cg) :
+                kernel_diff = kernels_ti - kernels_cg
+                mean_val_ti = df_ti[args.warmup_trials:args.warmup_trials+kernel_diff]['Duration'].astype(float).mean()
+                mean_val_ti *= ((kernel_diff) / kernels_cg)
+                #mean_val_ti += df_ti[args.warmup_trials+kernel_diff:]['Duration'].astype(float).mean()
+            else :
+                mean_val_ti = df_ti[args.warmup_trials:]['Duration'].astype(float).mean()
+        else :
+            mean_val_ti = df_ti[args.warmup_trials:]['Duration'].astype(float).mean()
         # Adjust time scale so it is consistent
         if time_scale == 's' :
             mean_val_ti *= 1000000.0
@@ -85,7 +100,7 @@ for dim0 in range(args.dim0_start, args.dim0_stop+args.dim0_inc, args.dim0_inc) 
             print(">>>CdGen Size: Grid: {:4} {:4} Block: {:4} {:4} Axis: {} Dim0: {} Dim1: {} Total Bytes: {:.03f} MB Elements: {:3d} Time: {:.03f} us {:.01f} %EFF".format( \
                 int(df_cg.iloc[0]['Grid X']), int(df_cg.iloc[0]['Grid Y']), int(df_cg.iloc[0]['Block X']), int(df_cg.iloc[0]['Block Y']), \
                 args.red_axis, dim0, dim1, total_bytes/1000000.0, tensor_size, mean_val, efficiency))
-        print(">>>TIter Size: Grid: {:4} {:4} Block: {:4} {:4} Axis: {} Dim0: {} Dim1: {} Total Bytes: {:.03f} MB Elements: {:3d} Time: {:.03f} us {:.01f} %EFF".format( \
+        print(">>>TIter Size: Grid: {:4} {:4} Block: {:4} {:4} Axis: {} Dim0: {} Dim1: {} Total Bytes: {:.03f} MB Elements: {:3d} Time: {:.03f} us {:.01f} %EFF TI Agg: {}".format( \
             int(df_ti.iloc[0]['Grid X']), int(df_ti.iloc[0]['Grid Y']), int(df_ti.iloc[0]['Block X']), int(df_ti.iloc[0]['Block Y']), \
-            args.red_axis, dim0, dim1, total_bytes/1000000.0, tensor_size, mean_val_ti, efficiency_ti))
+            args.red_axis, dim0, dim1, total_bytes/1000000.0, tensor_size, mean_val_ti, efficiency_ti, kernel_diff > 0))
         os.remove("prof_file.csv")
