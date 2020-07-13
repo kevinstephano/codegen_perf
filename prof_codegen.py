@@ -12,24 +12,44 @@ parser.add_argument('--warmup-trials', default='10', type=int, help='Warmup Tria
 parser.add_argument('--cuda-bin', default='/usr/local/cuda/bin/', type=str, help='Cuda Path')
 parser.add_argument('--print', action='store_true', help='Print profiler lines.')
 parser.add_argument('--ti', action='store_true', help='Run TensorIterator only.')
+parser.add_argument('--csv', action='store_true', help='Run TensorIterator only.')
 parser.add_argument('--fp16', action='store_true', help='Run FP16 precision.')
 parser.add_argument('--print-stdout', action='store_true', help='Run TensorIterator only.')
 parser.add_argument('--mem-clock', default=796.0, type=float, help='Mem Clock Frequency MHz')
 parser.add_argument('--dim0-start', default=80, type=int, help='Block X')
-parser.add_argument('--dim0-inc', default=5, type=int, help='Block X')
+parser.add_argument('--dim0-inc', default='pow2', help='Block X')
 parser.add_argument('--dim0-stop', default=80, type=int, help='Block X')
 parser.add_argument('--dim1-start', default=1024, type=int, help='Thread X')
-parser.add_argument('--dim1-inc', default=16, type=int, help='Thread X')
+parser.add_argument('--dim1-inc', default='pow2', help='Thread X')
 parser.add_argument('--dim1-stop', default=1024, type=int, help='Thread X')
 parser.add_argument('--red-axis', default=1, type=int, help='Thread X')
 parser.add_argument('--elem_size', default=4, type=int, help='Thread X')
 
 args = parser.parse_args()
+if args.csv :
+    print("Reduction Axis,Dim0,Dim1,Ti GridX,Ti GridY,Ti BlkX,Ti BlkY,Cg GridX,Cg GridY,Cg BlkX,Cg BlkY,CodeGen Time(us),Pytorch Eager Mode(us),CodeGen Eff Bw(GB/s),Pytorch Eager Mode Eff Bw(GB/s)")
 
 default_list = [args.cuda_bin + 'nvprof', '--device-buffer-size', '128', '--print-gpu-trace', '--csv', '--log-file', 'prof_file.csv', './build/codegen_perf', str(args.warmup_trials+args.trials)]
 
-for dim0 in range(args.dim0_start, args.dim0_stop+args.dim0_inc, args.dim0_inc) :
-    for dim1 in range(args.dim1_start, args.dim1_stop+args.dim1_inc, args.dim1_inc) :
+dim0_list = []
+if args.dim0_inc == 'pow2' :
+    curr = args.dim0_start
+    while curr <= args.dim0_stop :
+      dim0_list.append(curr)
+      curr <<= 1
+else :
+    dim0_list = range(args.dim0_start, args.dim0_stop+int(args.dim0_inc), int(args.dim0_inc))
+dim1_list = []
+if args.dim1_inc == 'pow2' :
+    curr = args.dim1_start
+    while curr <= args.dim1_stop :
+      dim1_list.append(curr)
+      curr <<= 1
+else :
+    dim1_list = range(args.dim1_start, args.dim1_stop+int(args.dim1_inc), int(args.dim1_inc))
+
+for dim0 in dim0_list :
+    for dim1 in dim1_list :
         cmd_list = default_list + [str(args.red_axis), str(dim0), str(dim1), str(1) if args.ti else str(0), str(1) if args.fp16 else str(0) ]
         output = subprocess.run(cmd_list, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
  
@@ -96,11 +116,18 @@ for dim0 in range(args.dim0_start, args.dim0_stop+args.dim0_inc, args.dim0_inc) 
 
         if args.print :
             print(df[args.warmup_trials:])
-        if not args.ti :
-            print(">>>CdGen Size: Grid: {:4} {:4} Block: {:4} {:4} Axis: {} Dim0: {} Dim1: {} Total Bytes: {:.03f} MB Elements: {:3d} Time: {:.03f} us {:.01f} %EFF".format( \
+        if args.csv :
+            print("{},{},{},{},{},{},{},{},{},{},{},{:.03f},{:.03f},{:.03f},{:.03f}".format( \
+                args.red_axis, dim0, dim1, \
+                int(df_ti.iloc[0]['Grid X']), int(df_ti.iloc[0]['Grid Y']), int(df_ti.iloc[0]['Block X']), int(df_ti.iloc[0]['Block Y']), \
                 int(df_cg.iloc[0]['Grid X']), int(df_cg.iloc[0]['Grid Y']), int(df_cg.iloc[0]['Block X']), int(df_cg.iloc[0]['Block Y']), \
-                args.red_axis, dim0, dim1, total_bytes/1000000.0, tensor_size, mean_val, efficiency))
-        print(">>>TIter Size: Grid: {:4} {:4} Block: {:4} {:4} Axis: {} Dim0: {} Dim1: {} Total Bytes: {:.03f} MB Elements: {:3d} Time: {:.03f} us {:.01f} %EFF TI Agg: {}".format( \
-            int(df_ti.iloc[0]['Grid X']), int(df_ti.iloc[0]['Grid Y']), int(df_ti.iloc[0]['Block X']), int(df_ti.iloc[0]['Block Y']), \
+                mean_val, mean_val_ti, total_bytes/mean_val/1000.0, total_bytes/mean_val_ti/1000.0))
+        else :
+            if not args.ti :
+                print(">>>CdGen Size: Grid: {:4} {:4} Block: {:4} {:4} Axis: {} Dim0: {} Dim1: {} Total Bytes: {:.03f} MB Elements: {:3d} Time: {:.03f} us {:.01f} %EFF".format( \
+                    int(df_cg.iloc[0]['Grid X']), int(df_cg.iloc[0]['Grid Y']), int(df_cg.iloc[0]['Block X']), int(df_cg.iloc[0]['Block Y']), \
+                    args.red_axis, dim0, dim1, total_bytes/1000000.0, tensor_size, mean_val, efficiency))
+            print(">>>TIter Size: Grid: {:4} {:4} Block: {:4} {:4} Axis: {} Dim0: {} Dim1: {} Total Bytes: {:.03f} MB Elements: {:3d} Time: {:.03f} us {:.01f} %EFF TI Agg: {}".format( \
+                int(df_ti.iloc[0]['Grid X']), int(df_ti.iloc[0]['Grid Y']), int(df_ti.iloc[0]['Block X']), int(df_ti.iloc[0]['Block Y']), \
             args.red_axis, dim0, dim1, total_bytes/1000000.0, tensor_size, mean_val_ti, efficiency_ti, kernel_diff > 0))
         os.remove("prof_file.csv")
