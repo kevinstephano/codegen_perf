@@ -76,7 +76,7 @@ for dim0 in dim0_list :
             tensor_size += dim1
         else :
             tensor_size += dim0
-        total_bytes = tensor_size * args.elem_size
+        total_bytes = tensor_size * (2 if args.fp16 else 4) 
         expected_val = total_bytes / (1024.0 * args.mem_clock * 1000000.0) * 1000000.0
 
         if not args.ti :
