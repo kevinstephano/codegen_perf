@@ -1,11 +1,12 @@
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/arith.h>
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
-#include <torch/csrc/jit/codegen/cuda/kernel.h>
 #include <torch/csrc/jit/codegen/cuda/lower2device.h>
 #include <torch/csrc/jit/codegen/cuda/type.h>
 #include <torch/csrc/jit/codegen/cuda/scheduler.h>
 #include <torch/csrc/jit/codegen/cuda/ir_graphviz.h>
+#include <torch/csrc/jit/codegen/cuda/ir_graphviz.h>
+#include <torch/csrc/jit/codegen/cuda/executor.h>
 #include <ATen/core/ivalue.h>
 
 #include <iostream>
@@ -23,14 +24,12 @@ static TensorView* makeDummyTensor(
 }
 
 void reduction(int trials, int red_dim, int dim0, int dim1, bool ti_only, bool fp16) {
-  torch::jit::fuser::cuda::CudaKernel prog;
-  prog.setFusionPtr(std::make_unique<Fusion>());
-  Fusion* fusion = prog.fusion();
-  FusionGuard fg(fusion);
+  Fusion fusion;
+  FusionGuard fg(&fusion);
 
   // Set up your input tensor views
   TensorView* tv0 = makeDummyTensor(2, (fp16 ? DataType::Half : DataType::Float));
-  fusion->addInput(tv0);
+  fusion.addInput(tv0);
 
   torch::jit::fuser::Val* tv0_cast = nullptr;
   if (fp16) {
@@ -44,32 +43,27 @@ void reduction(int trials, int red_dim, int dim0, int dim1, bool ti_only, bool f
     tv1_cast = castOp(DataType::Half, tv1);
   }
 
-	fusion->addOutput((fp16 ? tv1_cast : tv1));
-  //fusion->printMath();
+	fusion.addOutput((fp16 ? tv1_cast : tv1));
   //IrGraphGenerator::print(fusion, "ir.dot");
 
   auto options = at::TensorOptions().dtype((fp16 ? at::kHalf : at::kFloat)).device(at::kCUDA, 0);
   at::Tensor input = at::rand({dim0, dim1}, options);
-  at::Tensor cg_output = at::empty({(red_dim == 0 ? dim1 : dim0) }, options);
 
   // Apply reduction heuristic
   const at::ArrayRef<c10::IValue> inputs({input});
 
-  c10::optional<cuda::ReductionParams> rparams = cuda::scheduleReduction(fusion, inputs);
+  fusion.printMath();
+  c10::optional<cuda::ReductionParams> rparams = cuda::scheduleReduction(&fusion, inputs, tv1);
   TORCH_CHECK(rparams != c10::nullopt, "Reduction is not found!");
-  //fusion->printMath();
   if(fp16) {
-    for(auto &use : fusion->unordered_uses(tv0_cast)) {
-      tv0_cast->as<TensorView>()->computeAt(use->output(0)->as<TensorView>(), -1);
-    }
     if (red_dim == 0 ) {
-      int tidx = static_cast<Int*>(fusion->getLaunchConfig(LaunchConfigType::TIDx))->value().value();
+      int tidx = rparams.value().block_dim_x_;
       tv1_cast->split(-1, tidx);
       tv1_cast->axis(-1)->parallelize(ParallelType::TIDx);
       tv1_cast->axis(-2)->parallelize(ParallelType::BIDx);
     } else {
       if (rparams.value().mul_reds_per_blk_) {
-        int tidy = static_cast<Int*>(fusion->getLaunchConfig(LaunchConfigType::TIDy))->value().value();
+        int tidy = rparams.value().block_dim_y_;
         tv1_cast->split(0, tidy);
         tv1_cast->axis(-1)->parallelize(ParallelType::TIDy);
       }
@@ -78,19 +72,20 @@ void reduction(int trials, int red_dim, int dim0, int dim1, bool ti_only, bool f
   }
   //IrGraphGenerator::print(fusion, "ir.dot");
 
-  fusion->printMath();
-  GPULower gpulw(fusion);
+  fusion.printMath();
+  GPULower gpulw(&fusion);
   gpulw.printKernel(std::cout);
 
   std::cout << std::flush << std::endl;
-  prog.setDevice(0);
-  torch::jit::fuser::cuda::compileKernel(&prog);
+  torch::jit::fuser::cuda::FusionExecutor fe;
+  fe.compileFusion(&fusion);
 
   at::Tensor aten_output;
+  std::vector<at::Tensor> cg_output;
   for (int i = 0; i < trials; ++i) {
     if( !ti_only ) {
       at::Tensor flush_cache_1 = at::ones({6000*1024}, options);
-      torch::jit::fuser::cuda::runKernel(&prog, {input}, {cg_output}, c10::nullopt);
+      cg_output = fe.runFusion({input});
     }
     at::Tensor flush_cache_2 = at::ones({6000*1024}, options);
     aten_output = input.sum({red_dim});
@@ -100,9 +95,9 @@ void reduction(int trials, int red_dim, int dim0, int dim1, bool ti_only, bool f
 
   if( !ti_only)
     TORCH_CHECK(
-      aten_output.allclose(cg_output),
+      aten_output.allclose(cg_output[0]),
       "Error of: ",
-      aten_output.sub(cg_output).abs().max()); 
+      aten_output.sub(cg_output[0]).abs().max()); 
 }
 
 int main(int argc, char* argv[]) {
