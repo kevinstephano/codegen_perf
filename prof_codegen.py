@@ -37,6 +37,13 @@ if args.dim0_inc == 'pow2' :
     while curr <= args.dim0_stop :
       dim0_list.append(curr)
       curr <<= 1
+elif args.dim0_inc == 'pow2+1' :
+    curr = args.dim0_start
+    while curr <= args.dim0_stop :
+      dim0_list.append(curr)
+      curr -= 1
+      curr <<= 1
+      curr += 1
 else :
     dim0_list = range(args.dim0_start, args.dim0_stop+int(args.dim0_inc), int(args.dim0_inc))
 dim1_list = []
@@ -45,6 +52,13 @@ if args.dim1_inc == 'pow2' :
     while curr <= args.dim1_stop :
       dim1_list.append(curr)
       curr <<= 1
+elif args.dim1_inc == 'pow2+1' :
+    curr = args.dim1_start
+    while curr <= args.dim1_stop :
+      dim1_list.append(curr)
+      curr -= 1
+      curr <<= 1
+      curr += 1
 else :
     dim1_list = range(args.dim1_start, args.dim1_stop+int(args.dim1_inc), int(args.dim1_inc))
 
