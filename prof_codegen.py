@@ -64,7 +64,7 @@ else :
 
 for dim0 in dim0_list :
     for dim1 in dim1_list :
-        cmd_list = default_list + [str(args.red_axis), str(dim0), str(dim1), str(1) if args.ti else str(0), str(1) if args.fp16 else str(0) ]
+        cmd_list = default_list + [str(args.red_axis), str(dim0), str(dim1), str(1) if args.ti else str(0), str(1) if args.fp16 else str(0) , str(0)]
         output = subprocess.run(cmd_list, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
  
         if args.print_stdout :

@@ -8,6 +8,7 @@
 #include <torch/csrc/jit/codegen/cuda/ir_graphviz.h>
 #include <torch/csrc/jit/codegen/cuda/executor.h>
 #include <ATen/core/ivalue.h>
+#include "edit_kernel.h"
 
 #include <iostream>
 
@@ -23,7 +24,7 @@ static TensorView* makeDummyTensor(
   return new TensorView(new TensorDomain(dom), dtype);
 }
 
-void reduction(int trials, int red_dim, int dim0, int dim1, bool ti_only, bool fp16) {
+void reduction(int trials, int red_dim, int dim0, int dim1, bool ti_only, bool fp16, bool use_kernel_str) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -47,7 +48,7 @@ void reduction(int trials, int red_dim, int dim0, int dim1, bool ti_only, bool f
   //IrGraphGenerator::print(fusion, "ir.dot");
 
   auto options = at::TensorOptions().dtype((fp16 ? at::kHalf : at::kFloat)).device(at::kCUDA, 0);
-  at::Tensor input = at::rand({dim0, dim1}, options);
+  at::Tensor input = at::randn({dim0, dim1}, options);
 
   // Apply reduction heuristic
   const at::ArrayRef<c10::IValue> inputs({input});
@@ -78,7 +79,13 @@ void reduction(int trials, int red_dim, int dim0, int dim1, bool ti_only, bool f
 
   std::cout << std::flush << std::endl;
   torch::jit::fuser::cuda::FusionExecutor fe;
-  fe.compileFusion(&fusion);
+  if(use_kernel_str) {
+    std::stringstream code(cuda::kernel_string);
+    std::stringstream name(cuda::name_string);
+    fe.compileFusionFromStr(&fusion, code.str(),  "CudaCodeGen::kernel1", 1);
+  } else {
+    fe.compileFusion(&fusion);
+  }
 
   at::Tensor aten_output;
   std::vector<at::Tensor> cg_output;
@@ -90,29 +97,29 @@ void reduction(int trials, int red_dim, int dim0, int dim1, bool ti_only, bool f
     at::Tensor flush_cache_2 = at::ones({6000*1024}, options);
     aten_output = input.sum({red_dim});
   }
-  //std::cout << aten_output << std::endl;
-  //std::cout << cg_output << std::endl;
 
   if( !ti_only)
     TORCH_CHECK(
       aten_output.allclose(cg_output[0]),
       "Error of: ",
-      aten_output.sub(cg_output[0]).abs().max()); 
+      aten_output.sub(cg_output[0]).abs().max());
 }
 
 int main(int argc, char* argv[]) {
 
-  if (argc != 7) {
+  if (argc != 8) {
     throw std::runtime_error("You forgot to input the number of trials!");
   }
-  int trials  = atoi(argv[1]);
-  int red_dim = atoi(argv[2]);
-  int dim0    = atoi(argv[3]);
-  int dim1    = atoi(argv[4]);
-  bool ti_only= static_cast<bool>(atoi(argv[5]));
-  bool fp16   = static_cast<bool>(atoi(argv[6]));
+  int trials          = atoi(argv[1]);
+  int red_dim         = atoi(argv[2]);
+  int dim0            = atoi(argv[3]);
+  int dim1            = atoi(argv[4]);
+  bool ti_only        = static_cast<bool>(atoi(argv[5]));
+  bool fp16           = static_cast<bool>(atoi(argv[6]));
+  bool use_kernel_str = static_cast<bool>(atoi(argv[7]));
+  //cudaDeviceSetLimit(cudaLimitMaxL2FetchGranularity, 64);
 
-  reduction(trials, red_dim, dim0, dim1, ti_only, fp16);
+  reduction(trials, red_dim, dim0, dim1, ti_only, fp16, use_kernel_str);
 
   return 0;
 }
