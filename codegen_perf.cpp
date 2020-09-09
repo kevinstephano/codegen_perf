@@ -74,7 +74,7 @@ void reduction(int trials, int red_dim, int dim0, int dim1, bool ti_only, bool f
   //IrGraphGenerator::print(fusion, "ir.dot");
 
   fusion.printMath();
-  GPULower gpulw(&fusion);
+  GpuLower gpulw(&fusion);
   gpulw.printKernel(std::cout);
 
   std::cout << std::flush << std::endl;
@@ -100,9 +100,10 @@ void reduction(int trials, int red_dim, int dim0, int dim1, bool ti_only, bool f
 
   if( !ti_only)
     TORCH_CHECK(
-      aten_output.allclose(cg_output[0]),
+      aten_output.allclose(cg_output[0], (fp16 ? 1e-03 : 1e-05), (fp16 ? 1e-03 : 1e-08)),
       "Error of: ",
       aten_output.sub(cg_output[0]).abs().max());
+
 }
 
 int main(int argc, char* argv[]) {
