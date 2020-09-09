@@ -82,7 +82,7 @@ void reduction(int trials, int red_dim, int dim0, int dim1, bool ti_only, bool f
   if(use_kernel_str) {
     std::stringstream code(cuda::kernel_string);
     std::stringstream name(cuda::name_string);
-    fe.compileFusionFromStr(&fusion, code.str(),  "CudaCodeGen::kernel1", 1);
+    fe.debugCompileFusionFromStr(&fusion, code.str(),  "CudaCodeGen::kernel1", 1);
   } else {
     fe.compileFusion(&fusion);
   }
